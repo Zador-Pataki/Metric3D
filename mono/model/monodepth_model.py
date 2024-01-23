@@ -9,8 +9,8 @@ class DepthModel(BaseDepthModel):
         
     def inference(self, data):
         with torch.no_grad():
-            pred_depth, confidence, output_dict = self.forward(data)       
-        return pred_depth, confidence, output_dict
+            output = self.forward(data)       
+        return output
 
 def get_monodepth_model(
     cfg : dict,

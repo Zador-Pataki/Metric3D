@@ -12,9 +12,9 @@ class BaseDepthModel(nn.Module):
     def forward(self, data):
         output = self.depth_model(**data)
 
-        return output['prediction'], output['confidence'], output
+        return output
 
     def inference(self, data):
         with torch.no_grad():
-            pred_depth, confidence, _ = self.forward(data)
-        return pred_depth, confidence
+            out = self.forward(data)
+        return out

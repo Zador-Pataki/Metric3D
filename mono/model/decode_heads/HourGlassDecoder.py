@@ -222,7 +222,8 @@ class HourglassDecoder(nn.Module):
         return F.interpolate(x, scale_factor=scale_factor, mode='nearest')
 
     def regress_depth_2(self, feature_map_d):
-        prob = self.depth_regressor_2(feature_map_d).softmax(dim=1)
+        distrib = self.depth_regressor_2(feature_map_d)
+        prob = distrib.softmax(dim=1)
         B = prob.shape[0]
         if "depth_expectation_anchor" not in self._buffers:
             self.register_depth_expectation_anchor(self.num_depth_regressor_anchor, B)
@@ -230,7 +231,7 @@ class HourglassDecoder(nn.Module):
             prob,
             self.depth_expectation_anchor[:B, ...]
         ).unsqueeze(1)
-        return d
+        return d, distrib, prob
 
     def create_mesh_grid(self, height, width, batch, device="cuda", set_buffer=True):
         y, x = torch.meshgrid([torch.arange(0, height, dtype=torch.float32, device=device),
@@ -238,6 +239,13 @@ class HourglassDecoder(nn.Module):
         meshgrid = torch.stack((x, y))
         meshgrid = meshgrid.unsqueeze(0).repeat(batch, 1, 1, 1)
         return meshgrid
+    
+    def get_var(self, prob, depth_values):
+        B, C, H, W = prob.shape 
+        depth_values = depth_values.view(*depth_values.shape, 1, 1)
+        var = prob * depth_values
+        return var.var(dim=1)[:,None]
+
 
     def forward(self, features_mono, **kwargs):
         '''
@@ -254,8 +262,9 @@ class HourglassDecoder(nn.Module):
         confidence_map_2 = feature_map_mono_pred[:, -1:, :, :]
         feature_map_d_2 = feature_map_mono_pred[:, :-1, :, :]
 
-        depth_pred_2 = self.regress_depth_2(feature_map_d_2)
-
+        depth_pred_2, distrib, prob = self.regress_depth_2(feature_map_d_2)
+        B, _, _, _ = depth_pred_2.shape
+        var = self.get_var(prob, self.depth_expectation_anchor[:B, ...])
         B, _, H, W = depth_pred_2.shape
 
         meshgrid = self.create_mesh_grid(H, W, B)
@@ -265,10 +274,13 @@ class HourglassDecoder(nn.Module):
                 torch.cat((depth_pred_2, meshgrid[:B, ...], feature_map_d_2), 1)
             )
         confidence_map_mono = self.upsample(confidence_map_2, scale_factor=4)
+        var = self.upsample(var, scale_factor=4)
 
         outputs=dict(
             prediction=depth_pred_mono,
             confidence=confidence_map_mono,
             pred_logit=None,
+            var= var, 
+            distrib=distrib
         )
         return outputs
